@@ -391,6 +391,13 @@
       <button onclick="generateReport()">📄 Generate PDF report</button>
     </div>
   </div>
+  <div class="panel" id="syncPanel">
+    <h3>☁️ Cloud sync</h3>
+    <p class="psub" id="syncStatus">Off — your data stays on this device only.</p>
+    <div class="tools" style="margin:0" id="syncBtns">
+      <button onclick="openSyncModal()">Set up sync</button>
+    </div>
+  </div>
   <div class="streak-mini">🌟 <span>You've completed <b id="doneCount">0</b> tasks &amp; to-buys.</span></div>
   <div class="tools">
     <button onclick="exportData()">⬇️ Backup my data</button>
@@ -439,6 +446,21 @@
   </div>
 </div>
 
+<!-- sync modal -->
+<div class="modal-bg" id="syncBg">
+  <div class="modal">
+    <h3>Cloud sync setup</h3>
+    <p style="font-size:13px">Paste your Supabase details and choose a secret sync code. Use the <b>same sync code</b> on every device to keep them in sync.</p>
+    <input id="syncUrl" placeholder="Supabase URL (https://xxxx.supabase.co)" autocapitalize="off" autocorrect="off">
+    <input id="syncKey" placeholder="Supabase anon key" autocapitalize="off" autocorrect="off">
+    <input id="syncCode" placeholder="Your secret sync code" autocapitalize="off" autocorrect="off">
+    <div class="m-btns">
+      <button class="m-cancel" onclick="closeSyncModal()">Cancel</button>
+      <button class="m-ok" onclick="connectSync()">Connect</button>
+    </div>
+  </div>
+</div>
+
 <!-- printable report -->
 <div id="reportOut"></div>
 
@@ -461,7 +483,41 @@ let moneyMode='exp', selCat=EXP_CATS[0], selBuyCat='Shoes', showDone=false, show
 
 function load(){try{const d=JSON.parse(localStorage.getItem(KEY));if(d)return Object.assign(base(),d);}catch(e){}return base();}
 function base(){return {dump:[],todo:[],buy:[],income:[],expense:[],theme:'dark',doneTotal:0};}
-function save(){localStorage.setItem(KEY,JSON.stringify(db));}
+function save(){db.updatedAt=Date.now();localStorage.setItem(KEY,JSON.stringify(db));schedulePush();}
+
+/* ---------- cloud sync ---------- */
+const SKEY='myspace_sync';
+let sync=null;try{sync=JSON.parse(localStorage.getItem(SKEY));}catch(e){}
+let pushTimer=null;
+function rpc(fn,body){var base=sync.url.trim().replace(/\/+$/,'').replace(/\/rest\/v1$/,'');
+  return fetch(base+'/rest/v1/rpc/'+fn,{method:'POST',
+  headers:{'Content-Type':'application/json','apikey':sync.key,'Authorization':'Bearer '+sync.key},
+  body:JSON.stringify(body)});}
+function setSyncStatus(t){const e=document.getElementById('syncStatus');if(e)e.textContent=t;}
+function nowLabel(){return new Date().toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});}
+function schedulePush(){if(!sync)return;if(pushTimer)clearTimeout(pushTimer);pushTimer=setTimeout(pushCloud,1500);}
+function pushCloud(){if(!sync)return;setSyncStatus('Syncing…');
+  rpc('save_space',{p_code:sync.code,p_data:db}).then(function(r){if(!r.ok)throw 0;setSyncStatus('Synced ✓ · '+nowLabel());})
+    .catch(function(){setSyncStatus('Offline — will sync when back online.');});}
+function pullCloud(cb){if(!sync)return;setSyncStatus('Checking cloud…');
+  rpc('get_space',{p_code:sync.code}).then(function(r){return r.json();}).then(function(remote){
+    if(remote&&(remote.updatedAt||0)>(db.updatedAt||0)){db=Object.assign(base(),remote);localStorage.setItem(KEY,JSON.stringify(db));render();renderSyncPanel();setSyncStatus('Updated from cloud ✓ · '+nowLabel());}
+    else{setSyncStatus('Up to date ✓ · '+nowLabel());if((db.updatedAt||0)>((remote&&remote.updatedAt)||0))pushCloud();}
+    if(cb)cb();}).catch(function(){setSyncStatus('Offline — will sync when back online.');});}
+function openSyncModal(){if(sync){setVal('syncUrl',sync.url);setVal('syncKey',sync.key);setVal('syncCode',sync.code);}
+  document.getElementById('syncBg').classList.add('show');}
+function closeSyncModal(){document.getElementById('syncBg').classList.remove('show');}
+function connectSync(){const u=val('syncUrl').trim(),k=val('syncKey').trim(),c=val('syncCode').trim();
+  if(!u||!k||!c){alert('Please fill in all three fields.');return;}
+  sync={url:u,key:k,code:c};localStorage.setItem(SKEY,JSON.stringify(sync));closeSyncModal();renderSyncPanel();
+  pullCloud(function(){pushCloud();});}
+function disconnectSync(){sync=null;localStorage.removeItem(SKEY);renderSyncPanel();}
+function syncNow(){if(sync)pullCloud(function(){pushCloud();});else openSyncModal();}
+function renderSyncPanel(){const btns=document.getElementById('syncBtns');if(!btns)return;
+  if(sync){setSyncStatus('On · code “'+sync.code+'”. Syncs automatically.');
+    btns.innerHTML='<button onclick="syncNow()">🔄 Sync now</button><button onclick="openSyncModal()">Edit</button><button onclick="disconnectSync()">Turn off</button>';}
+  else{setSyncStatus('Off — your data stays on this device only.');
+    btns.innerHTML='<button onclick="openSyncModal()">Set up sync</button>';}}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
 function pad(n){return String(n).padStart(2,'0');}
 function toStr(dt){return dt.getFullYear()+'-'+pad(dt.getMonth()+1)+'-'+pad(dt.getDate());}
@@ -820,6 +876,8 @@ function importData(ev){const f=ev.target.files[0];if(!f)return;const r=new File
 
 /* ---------- init ---------- */
 greet();setMoneyMode('exp');setVal('moneyDate',today());setVal('todoDate',today());render();
+renderSyncPanel();if(sync)pullCloud(function(){pushCloud();});
+window.addEventListener('online',function(){if(sync)pullCloud(function(){pushCloud();});});
 </script>
 </body>
 </html>
