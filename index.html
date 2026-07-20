@@ -120,6 +120,7 @@
   .tag.date{background:var(--card2);color:var(--ink-soft);border:1px solid var(--line)}
   .tag.date.over{background:var(--bad-soft);color:var(--bad);border-color:var(--bad)}
   .tag.rec{background:var(--good-soft);color:var(--good)}
+  .ordb{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;padding:0 5px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:800;margin-right:7px;vertical-align:middle}
   .amt{font-size:17px;font-weight:700;flex:none;margin-left:6px}
   .amt.in{color:var(--good)}
   .amt.out{color:var(--bad)}
@@ -273,6 +274,7 @@
     </select>
     <input type="date" id="todoDate">
     <input type="time" id="todoTime">
+    <input type="number" id="todoOrder" placeholder="Order #" min="1">
     <select id="todoRec">
       <option value="">No repeat</option>
       <option value="daily">Repeats daily</option>
@@ -576,8 +578,9 @@ function defaultAddDate(){if(curFilter==='tomorrow')return tomorrowStr();if(curF
 function addDump(){const i=document.getElementById('dumpInput');const t=i.value.trim();if(!t)return;
   db.dump.unshift({id:uid(),text:t});i.value='';save();render();}
 function addTodo(){const i=document.getElementById('todoInput');const t=i.value.trim();if(!t)return;
-  db.todo.unshift({id:uid(),text:t,done:false,pri:val('todoPri'),date:val('todoDate'),time:val('todoTime'),rec:val('todoRec')});
-  i.value='';setVal('todoPri','low');setVal('todoRec','');setVal('todoTime','');setVal('todoDate',defaultAddDate());save();render();}
+  var o=parseInt(val('todoOrder'));
+  db.todo.unshift({id:uid(),text:t,done:false,pri:val('todoPri'),date:val('todoDate'),time:val('todoTime'),order:isNaN(o)?'':o,rec:val('todoRec')});
+  i.value='';setVal('todoPri','low');setVal('todoRec','');setVal('todoTime','');setVal('todoOrder','');setVal('todoDate',defaultAddDate());save();render();}
 function addBuy(){const i=document.getElementById('buyInput');const t=i.value.trim();if(!t)return;
   const p=parseFloat(val('buyPrice'));db.buy.unshift({id:uid(),text:t,done:false,cat:selBuyCat,price:isNaN(p)?null:p});
   i.value='';setVal('buyPrice','');save();render();}
@@ -596,7 +599,7 @@ function nextDate(d,rec){const dt=new Date(d+'T00:00:00');
   if(rec==='daily')dt.setDate(dt.getDate()+1);else if(rec==='weekly')dt.setDate(dt.getDate()+7);else if(rec==='monthly')dt.setMonth(dt.getMonth()+1);
   return toStr(dt);}
 function toggleTodo(id){const t=db.todo.find(x=>x.id===id);if(!t)return;
-  if(!t.done){if(t.rec){db.todo.unshift({id:uid(),text:t.text,done:false,pri:t.pri,date:t.date?nextDate(t.date,t.rec):'',time:t.time||'',rec:t.rec});}db.doneTotal++;t.doneAt=today();}
+  if(!t.done){if(t.rec){db.todo.unshift({id:uid(),text:t.text,done:false,pri:t.pri,date:t.date?nextDate(t.date,t.rec):'',time:t.time||'',order:t.order||'',rec:t.rec});}db.doneTotal++;t.doneAt=today();}
   else {db.doneTotal=Math.max(0,db.doneTotal-1);delete t.doneAt;}
   t.done=!t.done;save();render();}
 function openRs(id){rsId=id;const t=db.todo.find(x=>x.id===id);setVal('rsDate',t&&t.date?t.date:today());
@@ -654,6 +657,7 @@ function openEdit(type,id){
     h+='<select id="edPri">'+selOpts([['low','Priority: Low'],['med','Priority: Medium'],['high','Priority: High']],it.pri)+'</select>';
     h+='<input type="date" id="edDate" value="'+(it.date||'')+'">';
     h+='<input type="time" id="edTime" value="'+(it.time||'')+'">';
+    h+='<input type="number" id="edOrder" placeholder="Order # (optional)" min="1" value="'+(it.order?it.order:'')+'">';
     h+='<select id="edRec">'+selOpts([['','No repeat'],['daily','Repeats daily'],['weekly','Repeats weekly'],['monthly','Repeats monthly']],it.rec||'')+'</select>';
   }else if(type==='buy'){
     h+='<select id="edCat">'+catOpts(BUY_CATS,BUY_EMOJI,it.cat)+'</select>';
@@ -673,7 +677,7 @@ function openEdit(type,id){
 }
 function closeEdit(){document.getElementById('editBg').classList.remove('show');editCtx=null;}
 function saveEdit(){if(!editCtx)return;var t=editCtx.type,id=editCtx.id;var text=val('edText').trim();
-  if(t==='todo'){var it=db.todo.find(function(x){return x.id===id;});if(it){if(text)it.text=text;it.pri=val('edPri');it.date=val('edDate');it.time=val('edTime');it.rec=val('edRec');}}
+  if(t==='todo'){var it=db.todo.find(function(x){return x.id===id;});if(it){if(text)it.text=text;it.pri=val('edPri');it.date=val('edDate');it.time=val('edTime');var eo=parseInt(val('edOrder'));it.order=isNaN(eo)?'':eo;it.rec=val('edRec');}}
   else if(t==='buy'){var bb=db.buy.find(function(x){return x.id===id;});if(bb){if(text)bb.text=text;bb.cat=val('edCat');var p=parseFloat(val('edPrice'));bb.price=isNaN(p)?null:p;}}
   else if(t==='income'){var ic=db.income.find(function(x){return x.id===id;});if(ic){if(text)ic.text=text;ic.type=val('edType');var a=parseFloat(val('edAmt'));if(!isNaN(a)&&a>0)ic.amount=a;ic.date=val('edDate')||ic.date;}}
   else {var ex=db.expense.find(function(x){return x.id===id;});if(ex){if(text)ex.text=text;ex.cat=val('edCat');var a2=parseFloat(val('edAmt'));if(!isNaN(a2)&&a2>0)ex.amount=a2;ex.date=val('edDate')||ex.date;}}
@@ -682,7 +686,11 @@ function saveEdit(){if(!editCtx)return;var t=editCtx.type,id=editCtx.id;var text
 /* ---------- render ---------- */
 const priLabel={low:'Low',med:'Medium',high:'High'};
 const priOrder={high:0,med:1,low:2};
-function sortPri(a){return a.slice().sort(function(x,y){var tx=x.time||'99:99',ty=y.time||'99:99';if(tx!==ty)return tx<ty?-1:1;return priOrder[x.pri]-priOrder[y.pri];});}
+function sortPri(a){return a.slice().sort(function(x,y){
+  var ox=(x.order===''||x.order==null)?Infinity:+x.order,oy=(y.order===''||y.order==null)?Infinity:+y.order;
+  if(ox!==oy)return ox-oy;
+  var tx=x.time||'99:99',ty=y.time||'99:99';if(tx!==ty)return tx<ty?-1:1;
+  return priOrder[x.pri]-priOrder[y.pri];});}
 function fmtTime(t){if(!t)return '';var p=t.split(':');var h=+p[0];var ap=h<12?'AM':'PM';var h12=h%12||12;return h12+':'+p[1]+' '+ap;}
 function dayLabel(dt){const t0=today();if(dt===t0)return 'Today';if(dt===tomorrowStr())return 'Tomorrow';
   return new Date(dt+'T00:00:00').toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'});}
@@ -719,7 +727,7 @@ function todoCard(t,showDate){var tags='<span class="tag pri-'+t.pri+'">'+priLab
   var actions=t.done?'':'<button class="mini" onclick="openRs(\''+t.id+'\')" title="Move to another day">📅</button>';
   actions+='<button class="mini" onclick="openEdit(\'todo\',\''+t.id+'\')" title="Edit">✏️</button>';
   return el('<div class="card '+(t.done?'done':'')+'"><div class="check" onclick="toggleTodo(\''+t.id+'\')">'+(t.done?'✓':'')+'</div>'+
-    '<div class="body"><div class="name">'+esc(t.text)+'</div><div class="meta">'+tags+'</div></div>'+
+    '<div class="body"><div class="name">'+(t.order?'<span class="ordb">'+t.order+'</span>':'')+esc(t.text)+'</div><div class="meta">'+tags+'</div></div>'+
     '<div class="row-actions">'+actions+'<button class="mini" onclick="del(\'todo\',\''+t.id+'\')">🗑️</button></div></div>');}
 
 function renderTodo(){const list=document.getElementById('todoList');list.innerHTML='';
