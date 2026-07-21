@@ -300,6 +300,7 @@
   <div class="opt-row">
     <input type="number" id="buyPrice" placeholder="Est. price (optional)" min="0" step="0.01">
   </div>
+  <div class="chips" id="buyChips"></div>
   <div id="buyList"></div>
   <div class="section-label" id="doneBuyLabel" style="display:none">
     <span>Bought</span><span class="toggle-done" id="doneBuyToggle" onclick="toggleShowBought()">show</span>
@@ -482,23 +483,25 @@
 <script>
 /* ---------- data ---------- */
 const KEY='myspace_data_v2';
-const EXP_CATS=['Food & Groceries','Clothes','Shoes','Beauty & Creams','Salon & Grooming','Transport','Phone & Data','Bills & Rent','Health & Medicine','Outings & Fun','Gifts','Education','Savings','Other'];
+const EXP_CATS=['Food & Groceries','Clothes','Shoes','Beauty & Creams','Salon & Grooming','Health & Medicine','Electronics & Gadgets','Phone & Data','Books & Stationery','Accessories & Bags','Home','Transport','Bills & Rent','Outings & Fun','Education','Gifts','Savings','Other'];
 const INC_TYPES=['Salary','Business','Tuition / Class fees','From parents','Allowance / Pocket money','Freelance / Side work','Gift money','Cash in hand','Refunds','Other'];
-const EXP_EMOJI={'Food & Groceries':'🛒','Clothes':'👗','Shoes':'👟','Beauty & Creams':'🧴','Salon & Grooming':'💇‍♀️','Transport':'🚌','Phone & Data':'📱','Bills & Rent':'🏠','Health & Medicine':'💊','Outings & Fun':'🎉','Gifts':'🎁','Education':'📚','Savings':'🏦','Other':'✨'};
+const EXP_EMOJI={'Food & Groceries':'🛒','Clothes':'👗','Shoes':'👟','Beauty & Creams':'🧴','Salon & Grooming':'💇‍♀️','Health & Medicine':'💊','Electronics & Gadgets':'🎧','Phone & Data':'📱','Books & Stationery':'📚','Accessories & Bags':'👜','Home':'🏡','Transport':'🚌','Bills & Rent':'🏠','Outings & Fun':'🎉','Education':'🎓','Gifts':'🎁','Savings':'🏦','Other':'✨'};
 const INC_EMOJI={'Salary':'💼','Business':'🏪','Tuition / Class fees':'🎓','From parents':'👪','Allowance / Pocket money':'👛','Freelance / Side work':'💻','Gift money':'🎁','Cash in hand':'💵','Refunds':'↩️','Other':'✨'};
 const CAT_COLOR={'Food & Groceries':'--c1','Clothes':'--c2','Shoes':'--c3','Beauty & Creams':'--c4','Transport':'--c5','Bills & Rent':'--c6','Outings & Fun':'--c7','Health & Medicine':'--c8'};
 const INC_COLOR={'Salary':'--c1','Business':'--c2','Tuition / Class fees':'--c3','From parents':'--c4','Allowance / Pocket money':'--c5','Freelance / Side work':'--c6','Gift money':'--c7','Cash in hand':'--c8'};
-const BUY_TO_EXP={'Shoes':'Shoes','Clothes':'Clothes','Beauty & Creams':'Beauty & Creams','Food & Groceries':'Food & Groceries','Electronics & Gadgets':'Other','Books & Stationery':'Education','Accessories & Bags':'Clothes','Home & Health':'Other','Other':'Other'};
-const BUY_CATS=['Shoes','Clothes','Beauty & Creams','Electronics & Gadgets','Books & Stationery','Accessories & Bags','Home & Health','Food & Groceries','Other'];
-const BUY_EMOJI={'Shoes':'👟','Clothes':'👗','Beauty & Creams':'🧴','Electronics & Gadgets':'🎧','Books & Stationery':'📚','Accessories & Bags':'👜','Home & Health':'🏡','Food & Groceries':'🛒','Other':'✨'};
+const BUY_CATS=['Food & Groceries','Clothes','Shoes','Beauty & Creams','Salon & Grooming','Health & Medicine','Electronics & Gadgets','Phone & Data','Books & Stationery','Accessories & Bags','Home','Education','Gifts','Other'];
+const BUY_EMOJI={'Food & Groceries':'🛒','Clothes':'👗','Shoes':'👟','Beauty & Creams':'🧴','Salon & Grooming':'💇‍♀️','Health & Medicine':'💊','Electronics & Gadgets':'🎧','Phone & Data':'📱','Books & Stationery':'📚','Accessories & Bags':'👜','Home':'🏡','Education':'🎓','Gifts':'🎁','Other':'✨'};
+const BUY_SHORT={'Food & Groceries':'Groceries','Clothes':'Clothes','Shoes':'Shoes','Beauty & Creams':'Beauty','Salon & Grooming':'Salon','Health & Medicine':'Health','Electronics & Gadgets':'Electronics','Phone & Data':'Phone','Books & Stationery':'Books','Accessories & Bags':'Accessories','Home':'Home','Education':'Education','Gifts':'Gifts','Other':'Other'};
+const BUY_TO_EXP={};BUY_CATS.forEach(function(c){BUY_TO_EXP[c]=c;});
 const FILTERS=[['today','Today'],['tomorrow','Tomorrow'],['week','This Week'],['month','This Month'],['someday','Someday'],['all','All']];
 
 let db=load();
-let moneyMode='exp', selCat=EXP_CATS[0], selBuyCat='Shoes', showDone=false, showBought=false, pendingBuyId=null, curFilter='today', rsId=null;
+let moneyMode='exp', selCat=EXP_CATS[0], selBuyCat='Shoes', showDone=false, showBought=false, pendingBuyId=null, curFilter='today', buyFilter='all', rsId=null;
 
 function load(){try{const d=JSON.parse(localStorage.getItem(KEY));if(d){var b=Object.assign(base(),d);b.tomb=b.tomb||{};
   ['dump','todo','buy','income','expense'].forEach(function(l){(b[l]||[]).forEach(function(it){if(!it.m)it.m=1;});});
   var cut=Date.now()-5184000000;Object.keys(b.tomb).forEach(function(id){if(b.tomb[id]<cut)delete b.tomb[id];});
+  (b.buy||[]).forEach(function(it){if(it.cat==='Home & Health')it.cat='Home';if(BUY_CATS.indexOf(it.cat)<0)it.cat='Other';});
   return b;}}catch(e){}return base();}
 function base(){return {dump:[],todo:[],buy:[],income:[],expense:[],theme:'dark',doneTotal:0,tomb:{}};}
 function save(){db.updatedAt=Date.now();localStorage.setItem(KEY,JSON.stringify(db));schedulePush();}
@@ -779,20 +782,35 @@ function renderTodo(){const list=document.getElementById('todoList');list.innerH
   const dl=document.getElementById('doneTodoList');dl.style.display=showDone?'block':'none';dl.innerHTML='';
   done.forEach(function(t){dl.appendChild(todoCard(t,true));});}
 
-function buyCard(b){var tags='<span class="tag">'+esc(b.cat)+'</span>';
+function buyCard(b,showCat){var tags='';
+  if(showCat)tags+='<span class="tag">'+(BUY_EMOJI[b.cat]||'')+' '+esc(b.cat)+'</span>';
   if(b.price!=null)tags+='<span class="tag">'+(b.done?'💵 paid ':'~ ')+money(b.price)+'</span>';
+  var meta=tags?'<div class="meta">'+tags+'</div>':'';
   return el('<div class="card '+(b.done?'done':'')+'"><div class="check buy" onclick="toggleBuy(\''+b.id+'\')">'+(b.done?'✓':'')+'</div>'+
-    '<div class="body"><div class="name">'+esc(b.text)+'</div><div class="meta">'+tags+'</div></div>'+
+    '<div class="body"><div class="name">'+esc(b.text)+'</div>'+meta+'</div>'+
     '<div class="row-actions"><button class="mini" onclick="openEdit(\'buy\',\''+b.id+'\')" title="Edit">✏️</button><button class="mini" onclick="del(\'buy\',\''+b.id+'\')">🗑️</button></div></div>');}
-function renderBuy(){renderBuyGrid();const bl=document.getElementById('buyList');bl.innerHTML='';
+function shortCat(c){return BUY_SHORT[c]||c;}
+function setBuyFilter(f){buyFilter=f;render();}
+function renderBuy(){renderBuyGrid();
+  const chips=document.getElementById('buyChips');const bl=document.getElementById('buyList');bl.innerHTML='';
   const act=db.buy.filter(function(b){return !b.done;});
-  if(!act.length)bl.appendChild(el('<div class="empty"><span class="em">🛍️</span>Wishlist is empty.</div>'));
-  act.forEach(function(b){bl.appendChild(buyCard(b));});
+  const present=BUY_CATS.filter(function(c){return act.some(function(b){return b.cat===c;});});
+  if(buyFilter!=='all'&&present.indexOf(buyFilter)<0)buyFilter='all';
+  chips.innerHTML='';
+  chips.appendChild(el('<button class="chip'+(buyFilter==='all'?' on':'')+'" onclick="setBuyFilter(\'all\')">All ('+act.length+')</button>'));
+  present.forEach(function(c){var n=act.filter(function(b){return b.cat===c;}).length;
+    chips.appendChild(el('<button class="chip'+(buyFilter===c?' on':'')+'" onclick="setBuyFilter(\''+c.replace(/'/g,"\\'")+'\')">'+(BUY_EMOJI[c]||'')+' '+esc(shortCat(c))+' ('+n+')</button>'));});
+  if(!act.length){bl.appendChild(el('<div class="empty"><span class="em">🛍️</span>Wishlist is empty.</div>'));}
+  else{var cats=buyFilter==='all'?present:[buyFilter];
+    cats.forEach(function(c){var items=act.filter(function(b){return b.cat===c;});
+      var sub=items.reduce(function(s,b){return s+(b.price||0);},0);
+      bl.appendChild(el('<div class="day-head">'+(BUY_EMOJI[c]||'')+' '+esc(c)+' · '+items.length+(sub?' · '+money(sub):'')+'</div>'));
+      items.forEach(function(b){bl.appendChild(buyCard(b,false));});});}
   const bought=db.buy.filter(function(b){return b.done;});
   document.getElementById('doneBuyLabel').style.display=bought.length?'flex':'none';
   document.getElementById('doneBuyToggle').textContent=showBought?'hide':'show ('+bought.length+')';
   const dl=document.getElementById('doneBuyList');dl.style.display=showBought?'block':'none';dl.innerHTML='';
-  bought.forEach(function(b){dl.appendChild(buyCard(b));});}
+  bought.forEach(function(b){dl.appendChild(buyCard(b,true));});}
 
 function renderMoney(){const tx=document.getElementById('txList');tx.innerHTML='';
   const all=db.income.map(function(x){return Object.assign({},x,{kind:'in'});})
