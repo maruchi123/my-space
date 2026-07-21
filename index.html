@@ -496,8 +496,11 @@ const FILTERS=[['today','Today'],['tomorrow','Tomorrow'],['week','This Week'],['
 let db=load();
 let moneyMode='exp', selCat=EXP_CATS[0], selBuyCat='Shoes', showDone=false, showBought=false, pendingBuyId=null, curFilter='today', rsId=null;
 
-function load(){try{const d=JSON.parse(localStorage.getItem(KEY));if(d)return Object.assign(base(),d);}catch(e){}return base();}
-function base(){return {dump:[],todo:[],buy:[],income:[],expense:[],theme:'dark',doneTotal:0};}
+function load(){try{const d=JSON.parse(localStorage.getItem(KEY));if(d){var b=Object.assign(base(),d);b.tomb=b.tomb||{};
+  ['dump','todo','buy','income','expense'].forEach(function(l){(b[l]||[]).forEach(function(it){if(!it.m)it.m=1;});});
+  var cut=Date.now()-5184000000;Object.keys(b.tomb).forEach(function(id){if(b.tomb[id]<cut)delete b.tomb[id];});
+  return b;}}catch(e){}return base();}
+function base(){return {dump:[],todo:[],buy:[],income:[],expense:[],theme:'dark',doneTotal:0,tomb:{}};}
 function save(){db.updatedAt=Date.now();localStorage.setItem(KEY,JSON.stringify(db));schedulePush();}
 
 /* ---------- cloud sync ---------- */
@@ -510,24 +513,38 @@ function rpc(fn,body){var base=sync.url.trim().replace(/\/+$/,'').replace(/\/res
   body:JSON.stringify(body)});}
 function setSyncStatus(t){const e=document.getElementById('syncStatus');if(e)e.textContent=t;}
 function nowLabel(){return new Date().toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});}
-function schedulePush(){if(!sync)return;if(pushTimer)clearTimeout(pushTimer);pushTimer=setTimeout(pushCloud,1500);}
-function pushCloud(){if(!sync)return;setSyncStatus('Syncing…');
-  rpc('save_space',{p_code:sync.code,p_data:db}).then(function(r){if(!r.ok)throw 0;setSyncStatus('Synced ✓ · '+nowLabel());})
-    .catch(function(){setSyncStatus('Offline — will sync when back online.');});}
-function pullCloud(cb){if(!sync)return;setSyncStatus('Checking cloud…');
-  rpc('get_space',{p_code:sync.code}).then(function(r){return r.json();}).then(function(remote){
-    if(remote&&(remote.updatedAt||0)>(db.updatedAt||0)){db=Object.assign(base(),remote);localStorage.setItem(KEY,JSON.stringify(db));render();renderSyncPanel();setSyncStatus('Updated from cloud ✓ · '+nowLabel());}
-    else{setSyncStatus('Up to date ✓ · '+nowLabel());if((db.updatedAt||0)>((remote&&remote.updatedAt)||0))pushCloud();}
-    if(cb)cb();}).catch(function(){setSyncStatus('Offline — will sync when back online.');});}
+function schedulePush(){if(!sync)return;if(pushTimer)clearTimeout(pushTimer);pushTimer=setTimeout(syncReconcile,1200);}
+function mergeList(L,Rm,tomb){var map={};
+  (Rm||[]).forEach(function(it){map[it.id]=it;});
+  (L||[]).forEach(function(it){var ex=map[it.id];if(!ex||(it.m||0)>=(ex.m||0))map[it.id]=it;});
+  var arr=Object.keys(map).map(function(id){return map[id];}).filter(function(it){var td=tomb[it.id];return !(td&&td>=(it.m||0));});
+  arr.sort(function(a,b){return (b.m||0)-(a.m||0);});return arr;}
+function mergeDb(L,Rm){var tomb=Object.assign({},Rm.tomb||{});var lt=L.tomb||{};
+  Object.keys(lt).forEach(function(id){if(!tomb[id]||lt[id]>tomb[id])tomb[id]=lt[id];});
+  var out=base();out.tomb=tomb;
+  ['dump','todo','buy','income','expense'].forEach(function(l){out[l]=mergeList(L[l],Rm[l],tomb);});
+  out.theme=L.theme||Rm.theme||'dark';out.doneTotal=Math.max(L.doneTotal||0,Rm.doneTotal||0);
+  out.updatedAt=Math.max(L.updatedAt||0,Rm.updatedAt||0);return out;}
+function dataOnly(d){return JSON.stringify({d:d.dump,t:d.todo,b:d.buy,i:d.income,e:d.expense,x:d.tomb});}
+function syncReconcile(){if(!sync)return;setSyncStatus('Syncing…');
+  return rpc('get_space',{p_code:sync.code}).then(function(r){return r.json();}).then(function(remote){
+    var merged=remote?mergeDb(db,remote):db;
+    var localChanged=dataOnly(merged)!==dataOnly(db);
+    var remoteChanged=!remote||dataOnly(merged)!==dataOnly(remote);
+    if(localChanged||remoteChanged)db=merged;
+    if(localChanged){localStorage.setItem(KEY,JSON.stringify(db));render();renderSyncPanel();}
+    if(remoteChanged){db.updatedAt=Date.now();localStorage.setItem(KEY,JSON.stringify(db));
+      return rpc('save_space',{p_code:sync.code,p_data:db}).then(function(rr){if(!rr.ok)throw 0;setSyncStatus('Synced ✓ · '+nowLabel());});}
+    setSyncStatus('Up to date ✓ · '+nowLabel());
+  }).catch(function(){setSyncStatus('Offline — will sync when back online.');});}
 function openSyncModal(){if(sync){setVal('syncUrl',sync.url);setVal('syncKey',sync.key);setVal('syncCode',sync.code);}
   document.getElementById('syncBg').classList.add('show');}
 function closeSyncModal(){document.getElementById('syncBg').classList.remove('show');}
 function connectSync(){const u=val('syncUrl').trim(),k=val('syncKey').trim(),c=val('syncCode').trim();
   if(!u||!k||!c){alert('Please fill in all three fields.');return;}
-  sync={url:u,key:k,code:c};localStorage.setItem(SKEY,JSON.stringify(sync));closeSyncModal();renderSyncPanel();
-  pullCloud(function(){pushCloud();});}
+  sync={url:u,key:k,code:c};localStorage.setItem(SKEY,JSON.stringify(sync));closeSyncModal();renderSyncPanel();syncReconcile();}
 function disconnectSync(){sync=null;localStorage.removeItem(SKEY);renderSyncPanel();}
-function syncNow(){if(sync)pullCloud(function(){pushCloud();});else openSyncModal();}
+function syncNow(){if(sync)syncReconcile();else openSyncModal();}
 function renderSyncPanel(){const btns=document.getElementById('syncBtns');if(!btns)return;
   if(sync){setSyncStatus('On · code “'+sync.code+'”. Syncs automatically.');
     btns.innerHTML='<button onclick="syncNow()">🔄 Sync now</button><button onclick="openSyncModal()">Edit</button><button onclick="disconnectSync()">Turn off</button>';}
@@ -576,13 +593,13 @@ function defaultAddDate(){if(curFilter==='tomorrow')return tomorrowStr();if(curF
 
 /* ---------- add ---------- */
 function addDump(){const i=document.getElementById('dumpInput');const t=i.value.trim();if(!t)return;
-  db.dump.unshift({id:uid(),text:t});i.value='';save();render();}
+  db.dump.unshift({id:uid(),text:t,m:Date.now()});i.value='';save();render();}
 function addTodo(){const i=document.getElementById('todoInput');const t=i.value.trim();if(!t)return;
   var o=parseInt(val('todoOrder'));
-  db.todo.unshift({id:uid(),text:t,done:false,pri:val('todoPri'),date:val('todoDate'),time:val('todoTime'),order:isNaN(o)?'':o,rec:val('todoRec')});
+  db.todo.unshift({id:uid(),text:t,done:false,pri:val('todoPri'),date:val('todoDate'),time:val('todoTime'),order:isNaN(o)?'':o,rec:val('todoRec'),m:Date.now()});
   i.value='';setVal('todoPri','low');setVal('todoRec','');setVal('todoTime','');setVal('todoOrder','');setVal('todoDate',defaultAddDate());save();render();}
 function addBuy(){const i=document.getElementById('buyInput');const t=i.value.trim();if(!t)return;
-  const p=parseFloat(val('buyPrice'));db.buy.unshift({id:uid(),text:t,done:false,cat:selBuyCat,price:isNaN(p)?null:p});
+  const p=parseFloat(val('buyPrice'));db.buy.unshift({id:uid(),text:t,done:false,cat:selBuyCat,price:isNaN(p)?null:p,m:Date.now()});
   i.value='';setVal('buyPrice','');save();render();}
 function pickBuyCat(c){selBuyCat=c;renderBuyGrid();}
 function renderBuyGrid(){const g=document.getElementById('buyCatGrid');g.innerHTML='';
@@ -590,8 +607,8 @@ function renderBuyGrid(){const g=document.getElementById('buyCatGrid');g.innerHT
     '<span class="ce">'+(BUY_EMOJI[c]||'✨')+'</span><span class="cn">'+esc(c)+'</span></div>'));});}
 
 /* ---------- convert ---------- */
-function toTodo(id){const x=pull('dump',id);if(!x)return;db.todo.unshift({id:uid(),text:x.text,done:false,pri:'low',date:today(),time:'',rec:''});save();render();showView('todo');}
-function toBuy(id){const x=pull('dump',id);if(!x)return;db.buy.unshift({id:uid(),text:x.text,done:false,cat:'Other',price:null});save();render();showView('buy');}
+function toTodo(id){const x=pull('dump',id);if(!x)return;db.tomb[x.id]=Date.now();db.todo.unshift({id:uid(),text:x.text,done:false,pri:'low',date:today(),time:'',rec:'',m:Date.now()});save();render();showView('todo');}
+function toBuy(id){const x=pull('dump',id);if(!x)return;db.tomb[x.id]=Date.now();db.buy.unshift({id:uid(),text:x.text,done:false,cat:'Other',price:null,m:Date.now()});save();render();showView('buy');}
 function pull(list,id){const i=db[list].findIndex(x=>x.id===id);if(i<0)return null;return db[list].splice(i,1)[0];}
 
 /* ---------- todo done / recurring / reschedule ---------- */
@@ -599,29 +616,29 @@ function nextDate(d,rec){const dt=new Date(d+'T00:00:00');
   if(rec==='daily')dt.setDate(dt.getDate()+1);else if(rec==='weekly')dt.setDate(dt.getDate()+7);else if(rec==='monthly')dt.setMonth(dt.getMonth()+1);
   return toStr(dt);}
 function toggleTodo(id){const t=db.todo.find(x=>x.id===id);if(!t)return;
-  if(!t.done){if(t.rec){db.todo.unshift({id:uid(),text:t.text,done:false,pri:t.pri,date:t.date?nextDate(t.date,t.rec):'',time:t.time||'',order:t.order||'',rec:t.rec});}db.doneTotal++;t.doneAt=today();}
+  if(!t.done){if(t.rec){db.todo.unshift({id:uid(),text:t.text,done:false,pri:t.pri,date:t.date?nextDate(t.date,t.rec):'',time:t.time||'',order:t.order||'',rec:t.rec,m:Date.now()});}db.doneTotal++;t.doneAt=today();}
   else {db.doneTotal=Math.max(0,db.doneTotal-1);delete t.doneAt;}
-  t.done=!t.done;save();render();}
+  t.done=!t.done;t.m=Date.now();save();render();}
 function openRs(id){rsId=id;const t=db.todo.find(x=>x.id===id);setVal('rsDate',t&&t.date?t.date:today());
   document.getElementById('rsBg').classList.add('show');}
 function closeRs(){document.getElementById('rsBg').classList.remove('show');rsId=null;}
-function rsApply(dateStr){const t=db.todo.find(x=>x.id===rsId);if(t){t.date=dateStr;save();}closeRs();render();}
+function rsApply(dateStr){const t=db.todo.find(x=>x.id===rsId);if(t){t.date=dateStr;t.m=Date.now();save();}closeRs();render();}
 function rsSet(kind){let s='';if(kind==='today')s=today();else if(kind==='tomorrow')s=tomorrowStr();
   else if(kind==='weekend')s=weekendStr();else if(kind==='nextweek')s=nextWeekStr();else s='';rsApply(s);}
 function rsSetDate(){rsApply(val('rsDate')||'');}
-function moveAllOverdue(){const t0=today();db.todo.forEach(function(t){if(!t.done&&t.date&&t.date<t0)t.date=t0;});save();render();}
+function moveAllOverdue(){const t0=today();db.todo.forEach(function(t){if(!t.done&&t.date&&t.date<t0){t.date=t0;t.m=Date.now();}});save();render();}
 
 /* ---------- buy -> expense ---------- */
 function toggleBuy(id){const b=db.buy.find(x=>x.id===id);if(!b)return;
-  if(b.done){b.done=false;db.doneTotal=Math.max(0,db.doneTotal-1);if(b.expId){db.expense=db.expense.filter(e=>e.id!==b.expId);b.expId=null;}save();render();return;}
+  if(b.done){b.done=false;b.m=Date.now();db.doneTotal=Math.max(0,db.doneTotal-1);if(b.expId){db.tomb[b.expId]=Date.now();db.expense=db.expense.filter(e=>e.id!==b.expId);b.expId=null;}save();render();return;}
   pendingBuyId=id;document.getElementById('modalText').innerHTML='What did you pay for <b>'+esc(b.text)+'</b>?';
   document.getElementById('modalPrice').value=b.price!=null?b.price:'';document.getElementById('modalBg').classList.add('show');
   setTimeout(function(){document.getElementById('modalPrice').focus();},50);}
 function closeModal(){document.getElementById('modalBg').classList.remove('show');pendingBuyId=null;}
 function confirmBuy(){const b=db.buy.find(x=>x.id===pendingBuyId);if(!b){closeModal();return;}
   let p=parseFloat(document.getElementById('modalPrice').value);if(isNaN(p)||p<0)p=0;
-  const exp={id:uid(),text:b.text,cat:BUY_TO_EXP[b.cat]||'Other',amount:p,date:today()};
-  db.expense.unshift(exp);b.done=true;b.expId=exp.id;b.price=p;db.doneTotal++;save();closeModal();render();}
+  const exp={id:uid(),text:b.text,cat:BUY_TO_EXP[b.cat]||'Other',amount:p,date:today(),m:Date.now()};
+  db.expense.unshift(exp);b.done=true;b.expId=exp.id;b.price=p;b.m=Date.now();db.doneTotal++;save();closeModal();render();}
 
 /* ---------- money ---------- */
 function setMoneyMode(m){moneyMode=m;
@@ -638,11 +655,12 @@ function renderCatGrid(){const g=document.getElementById('moneyCatGrid');g.inner
 function addMoney(){const t=val('moneyText').trim();let a=parseFloat(val('moneyAmt'));
   if(isNaN(a)||a<=0){document.getElementById('moneyAmt').focus();return;}
   const d=val('moneyDate')||today();
-  if(moneyMode==='exp')db.expense.unshift({id:uid(),text:t||selCat,cat:selCat,amount:a,date:d});
-  else db.income.unshift({id:uid(),text:t||selCat,type:selCat,amount:a,date:d});
+  if(moneyMode==='exp')db.expense.unshift({id:uid(),text:t||selCat,cat:selCat,amount:a,date:d,m:Date.now()});
+  else db.income.unshift({id:uid(),text:t||selCat,type:selCat,amount:a,date:d,m:Date.now()});
   setVal('moneyText','');setVal('moneyAmt','');setVal('moneyDate',today());save();render();}
 
-function del(list,id){if(list==='expense'){const e=db.expense.find(x=>x.id===id);if(e){const b=db.buy.find(x=>x.expId===id);if(b){b.done=false;b.expId=null;db.doneTotal=Math.max(0,db.doneTotal-1);}}}
+function del(list,id){if(list==='expense'){const e=db.expense.find(x=>x.id===id);if(e){const b=db.buy.find(x=>x.expId===id);if(b){b.done=false;b.expId=null;b.m=Date.now();db.doneTotal=Math.max(0,db.doneTotal-1);}}}
+  db.tomb[id]=Date.now();
   db[list]=db[list].filter(x=>x.id!==id);save();render();}
 
 /* ---------- edit ---------- */
@@ -677,10 +695,10 @@ function openEdit(type,id){
 }
 function closeEdit(){document.getElementById('editBg').classList.remove('show');editCtx=null;}
 function saveEdit(){if(!editCtx)return;var t=editCtx.type,id=editCtx.id;var text=val('edText').trim();
-  if(t==='todo'){var it=db.todo.find(function(x){return x.id===id;});if(it){if(text)it.text=text;it.pri=val('edPri');it.date=val('edDate');it.time=val('edTime');var eo=parseInt(val('edOrder'));it.order=isNaN(eo)?'':eo;it.rec=val('edRec');}}
-  else if(t==='buy'){var bb=db.buy.find(function(x){return x.id===id;});if(bb){if(text)bb.text=text;bb.cat=val('edCat');var p=parseFloat(val('edPrice'));bb.price=isNaN(p)?null:p;}}
-  else if(t==='income'){var ic=db.income.find(function(x){return x.id===id;});if(ic){if(text)ic.text=text;ic.type=val('edType');var a=parseFloat(val('edAmt'));if(!isNaN(a)&&a>0)ic.amount=a;ic.date=val('edDate')||ic.date;}}
-  else {var ex=db.expense.find(function(x){return x.id===id;});if(ex){if(text)ex.text=text;ex.cat=val('edCat');var a2=parseFloat(val('edAmt'));if(!isNaN(a2)&&a2>0)ex.amount=a2;ex.date=val('edDate')||ex.date;}}
+  if(t==='todo'){var it=db.todo.find(function(x){return x.id===id;});if(it){if(text)it.text=text;it.pri=val('edPri');it.date=val('edDate');it.time=val('edTime');var eo=parseInt(val('edOrder'));it.order=isNaN(eo)?'':eo;it.rec=val('edRec');it.m=Date.now();}}
+  else if(t==='buy'){var bb=db.buy.find(function(x){return x.id===id;});if(bb){if(text)bb.text=text;bb.cat=val('edCat');var p=parseFloat(val('edPrice'));bb.price=isNaN(p)?null:p;bb.m=Date.now();}}
+  else if(t==='income'){var ic=db.income.find(function(x){return x.id===id;});if(ic){if(text)ic.text=text;ic.type=val('edType');var a=parseFloat(val('edAmt'));if(!isNaN(a)&&a>0)ic.amount=a;ic.date=val('edDate')||ic.date;ic.m=Date.now();}}
+  else {var ex=db.expense.find(function(x){return x.id===id;});if(ex){if(text)ex.text=text;ex.cat=val('edCat');var a2=parseFloat(val('edAmt'));if(!isNaN(a2)&&a2>0)ex.amount=a2;ex.date=val('edDate')||ex.date;ex.m=Date.now();}}
   save();closeEdit();render();}
 
 /* ---------- render ---------- */
@@ -937,11 +955,11 @@ function importData(ev){const f=ev.target.files[0];if(!f)return;const r=new File
 
 /* ---------- init ---------- */
 greet();setMoneyMode('exp');setVal('moneyDate',today());setVal('todoDate',today());render();
-renderSyncPanel();if(sync)pullCloud(function(){pushCloud();});
-window.addEventListener('online',function(){if(sync)pullCloud(function(){pushCloud();});});
-window.addEventListener('focus',function(){if(sync)pullCloud();});
-document.addEventListener('visibilitychange',function(){if(sync&&document.visibilityState==='visible')pullCloud();});
-setInterval(function(){if(sync&&document.visibilityState==='visible'&&navigator.onLine!==false)pullCloud();},15000);
+renderSyncPanel();if(sync)syncReconcile();
+window.addEventListener('online',function(){if(sync)syncReconcile();});
+window.addEventListener('focus',function(){if(sync)syncReconcile();});
+document.addEventListener('visibilitychange',function(){if(sync&&document.visibilityState==='visible')syncReconcile();});
+setInterval(function(){if(sync&&document.visibilityState==='visible'&&navigator.onLine!==false)syncReconcile();},15000);
 </script>
 </body>
 </html>
